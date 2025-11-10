@@ -1,4 +1,4 @@
-name: wp_osrodek_klikuszowa_pl
+name: ${PROJECT_NAME}
 
 volumes:
   wp_html:
@@ -8,7 +8,7 @@ volumes:
 services:
   wordpress:
     image: wordpress:6.6.2-php8.3-apache
-    container_name: wp_osrodek_klikuszowa_pl_app
+    container_name: ${PROJECT_NAME}_app
     env_file: [ .env ]
     ports:
       - "127.0.0.1:8083:80"
@@ -17,9 +17,31 @@ services:
       WORDPRESS_DB_NAME: ${DB_NAME}
       WORDPRESS_DB_USER: ${DB_USER}
       WORDPRESS_DB_PASSWORD: ${DB_PASSWORD}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASS: ${SMTP_PASS}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_SECURE: ${SMTP_SECURE}
+      MAIL_FROM: ${MAIL_FROM}
+      MAIL_FROM_NAME: ${MAIL_FROM_NAME}
       WORDPRESS_CONFIG_EXTRA: |
-        define('FORCE_SSL_ADMIN', true);
+        if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO']==='https') { $_SERVER['HTTPS']='on'; } define('FORCE_SSL_ADMIN', true);
         define('WP_MEMORY_LIMIT', '256M');
+        add_action('phpmailer_init', function($phpmailer){
+          $host = getenv('SMTP_HOST'); if(!$host) return;
+          $phpmailer->isSMTP();
+          $phpmailer->Host = $host;
+          $phpmailer->SMTPAuth = true;
+          $phpmailer->Username = getenv('SMTP_USER') ?: '';
+          $phpmailer->Password = getenv('SMTP_PASS') ?: '';
+          $phpmailer->Port = (int)(getenv('SMTP_PORT') ?: 587);
+          $sec = strtolower(getenv('SMTP_SECURE') ?: 'tls');
+          if (in_array($sec, ['ssl','tls'], true)) $phpmailer->SMTPSecure = $sec;
+          if ($from = getenv('MAIL_FROM')) {
+            $phpmailer->setFrom($from, getenv('MAIL_FROM_NAME') ?: '');
+            $phpmailer->addReplyTo($from, getenv('MAIL_FROM_NAME') ?: '');
+          }
+        });
     volumes:
       - wp_html:/var/www/html
       - ./data/wp-content:/var/www/html/wp-content
@@ -28,7 +50,7 @@ services:
       mysql:
         condition: service_healthy
     healthcheck:
-      test: [ "CMD-SHELL", "curl -fsS http://localhost/wp-login.php >/dev/null || exit 1" ]
+      test: [ "CMD-SHELL", "php -r 'exit((int)!@file_get_contents(\"http://localhost/wp-login.php\"));'" ]
       interval: 30s
       timeout: 5s
       retries: 10
@@ -36,7 +58,7 @@ services:
 
   mysql:
     image: mysql:8.0.40
-    container_name: wp_osrodek_klikuszowa_pl_db
+    container_name: ${PROJECT_NAME}_db
     env_file: [ .env ]
     command: >
       --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --default-authentication-plugin=mysql_native_password
@@ -76,6 +98,15 @@ services:
     command: |
       set -e
       cd /var/www/html
+      for i in $(seq 1 60); do [ -f index.php ] && break; sleep 1; done
+      if [ ! -f wp-config.php ]; then
+        wp config create \
+          --dbname="$WORDPRESS_DB_NAME" \
+          --dbuser="$WORDPRESS_DB_USER" \
+          --dbpass="$WORDPRESS_DB_PASSWORD" \
+          --dbhost="$WORDPRESS_DB_HOST" \
+          --skip-check
+      fi
       if ! wp core is-installed --quiet; then
         wp core install \
           --url="${WP_URL}" \
