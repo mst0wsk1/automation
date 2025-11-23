@@ -1,17 +1,53 @@
 name: ${PROJECT_NAME}
 
 volumes:
-  wp_html:
   db_data:
 
+networks:
+  frontend:
+  backend:
 
 services:
+  mysql:
+    image: mysql:8.0.40
+    container_name: ${PROJECT_NAME}_db
+    env_file: [.env]
+    command: >
+      --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - backend
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          memory: 512M
+    restart: always
+
   wordpress:
     image: wordpress:6.6.2-php8.3-apache
     container_name: ${PROJECT_NAME}_app
-    env_file: [ .env ]
+    env_file: [.env]
     ports:
-      - "127.0.0.1:8083:80"
+      - "127.0.0.1:8082:80"
     environment:
       WORDPRESS_DB_HOST: mysql:3306
       WORDPRESS_DB_NAME: ${DB_NAME}
@@ -25,95 +61,35 @@ services:
       MAIL_FROM: ${MAIL_FROM}
       MAIL_FROM_NAME: ${MAIL_FROM_NAME}
       WORDPRESS_CONFIG_EXTRA: |
-        if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO']==='https') { $_SERVER['HTTPS']='on'; } define('FORCE_SSL_ADMIN', true);
+        if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO']==='https') { $_SERVER['HTTPS']='on'; }
+        define('FORCE_SSL_ADMIN', true);
         define('WP_MEMORY_LIMIT', '256M');
-        add_action('phpmailer_init', function($phpmailer){
-          $host = getenv('SMTP_HOST'); if(!$host) return;
-          $phpmailer->isSMTP();
-          $phpmailer->Host = $host;
-          $phpmailer->SMTPAuth = true;
-          $phpmailer->Username = getenv('SMTP_USER') ?: '';
-          $phpmailer->Password = getenv('SMTP_PASS') ?: '';
-          $phpmailer->Port = (int)(getenv('SMTP_PORT') ?: 587);
-          $sec = strtolower(getenv('SMTP_SECURE') ?: 'tls');
-          if (in_array($sec, ['ssl','tls'], true)) $phpmailer->SMTPSecure = $sec;
-          if ($from = getenv('MAIL_FROM')) {
-            $phpmailer->setFrom($from, getenv('MAIL_FROM_NAME') ?: '');
-            $phpmailer->addReplyTo($from, getenv('MAIL_FROM_NAME') ?: '');
-          }
-        });
+        define('DISALLOW_FILE_EDIT', true);
     volumes:
-      - wp_html:/var/www/html
       - ./data/wp-content:/var/www/html/wp-content
+      - ./mu-plugins/00-smtp.php:/var/www/html/wp-content/mu-plugins/00-smtp.php:ro
       - ./php/php.ini:/usr/local/etc/php/conf.d/uploads.ini:ro
     depends_on:
       mysql:
         condition: service_healthy
     healthcheck:
-      test: [ "CMD-SHELL", "php -r 'exit((int)!@file_get_contents(\"http://localhost/wp-login.php\"));'" ]
+      test: ["CMD-SHELL", "php -r 'exit((int)!@file_get_contents(\"http://localhost/wp-login.php\"));'"]
       interval: 30s
       timeout: 5s
       retries: 10
-    restart: unless-stopped
-
-  mysql:
-    image: mysql:8.0.40
-    container_name: ${PROJECT_NAME}_db
-    env_file: [ .env ]
-    command: >
-      --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --default-authentication-plugin=mysql_native_password
-    environment:
-      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${DB_NAME}
-      MYSQL_USER: ${DB_USER}
-      MYSQL_PASSWORD: ${DB_PASSWORD}
-    volumes:
-      - db_data:/var/lib/mysql
-    healthcheck:
-      test: [ "CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${DB_ROOT_PASSWORD}" ]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-    restart: unless-stopped
-
-  wp_init:
-    image: wordpress:cli-php8.3
-    depends_on:
-      - wordpress
-      - mysql
-    environment:
-      WP_URL: ${WP_URL}
-      WP_TITLE: ${WP_TITLE}
-      WP_ADMIN_USER: ${WP_ADMIN_USER}
-      WP_ADMIN_PASS: ${WP_ADMIN_PASS}
-      WP_ADMIN_EMAIL: ${WP_ADMIN_EMAIL}
-      WORDPRESS_DB_HOST: mysql:3306
-      WORDPRESS_DB_NAME: ${DB_NAME}
-      WORDPRESS_DB_USER: ${DB_USER}
-      WORDPRESS_DB_PASSWORD: ${DB_PASSWORD}
-    volumes:
-      - wp_html:/var/www/html
-      - ./data/wp-content:/var/www/html/wp-content
-    entrypoint: [ "/bin/bash", "-lc" ]
-    command: |
-      set -e
-      cd /var/www/html
-      for i in $(seq 1 60); do [ -f index.php ] && break; sleep 1; done
-      if [ ! -f wp-config.php ]; then
-        wp config create \
-          --dbname="$WORDPRESS_DB_NAME" \
-          --dbuser="$WORDPRESS_DB_USER" \
-          --dbpass="$WORDPRESS_DB_PASSWORD" \
-          --dbhost="$WORDPRESS_DB_HOST" \
-          --skip-check
-      fi
-      if ! wp core is-installed --quiet; then
-        wp core install \
-          --url="${WP_URL}" \
-          --title="${WP_TITLE}" \
-          --admin_user="${WP_ADMIN_USER}" \
-          --admin_password="${WP_ADMIN_PASS}" \
-          --admin_email="${WP_ADMIN_EMAIL}" \
-          --skip-email
-      fi
-    restart: "no"
+    networks:
+      - frontend
+      - backend
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          memory: 256M
+    restart: always

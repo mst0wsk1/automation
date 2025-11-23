@@ -1,0 +1,5 @@
+.DS_Store
+.env
+docker/backups/
+docker/data/
+*.log
