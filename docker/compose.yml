@@ -65,6 +65,7 @@ services:
         define('FORCE_SSL_ADMIN', true);
         define('WP_MEMORY_LIMIT', '256M');
         define('DISALLOW_FILE_EDIT', true);
+        define('FS_METHOD', 'direct');
     volumes:
       - ./data/wp-content:/var/www/html/wp-content
       - ./mu-plugins/00-smtp.php:/var/www/html/wp-content/mu-plugins/00-smtp.php:ro
