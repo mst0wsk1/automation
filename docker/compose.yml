@@ -60,6 +60,8 @@ services:
       SMTP_SECURE: ${SMTP_SECURE}
       MAIL_FROM: ${MAIL_FROM}
       MAIL_FROM_NAME: ${MAIL_FROM_NAME}
+      PHP_MAX_EXECUTION_TIME: '600'
+      PHP_MEMORY_LIMIT: '512M'
       WORDPRESS_CONFIG_EXTRA: |
         if (($$_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https') { $$_SERVER['HTTPS']='on'; }
         define('FORCE_SSL_ADMIN', true);
