@@ -43,7 +43,7 @@ services:
     restart: always
 
   wordpress:
-    image: wordpress:6.6.2-php8.3-apache
+    image: wordpress:6.7-php8.3-apache
     container_name: ${PROJECT_NAME}_app
     env_file: [.env]
     ports:
@@ -62,12 +62,16 @@ services:
       MAIL_FROM_NAME: ${MAIL_FROM_NAME}
       PHP_MAX_EXECUTION_TIME: '600'
       PHP_MEMORY_LIMIT: '512M'
+      WORDPRESS_REDIS_HOST: redis
+      WORDPRESS_REDIS_PORT: 6379
       WORDPRESS_CONFIG_EXTRA: |
         if (($$_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https') { $$_SERVER['HTTPS']='on'; }
         define('FORCE_SSL_ADMIN', true);
         define('WP_MEMORY_LIMIT', '256M');
         define('DISALLOW_FILE_EDIT', true);
         define('FS_METHOD', 'direct');
+        define('WP_REDIS_HOST', getenv('WORDPRESS_REDIS_HOST') ?: 'redis');
+        define('WP_REDIS_PORT', getenv('WORDPRESS_REDIS_PORT') ?: 6379);
     volumes:
       - ./data/wp-content:/var/www/html/wp-content
       - ./mu-plugins/00-smtp.php:/var/www/html/wp-content/mu-plugins/00-smtp.php:ro
@@ -95,4 +99,17 @@ services:
           memory: 512M
         reservations:
           memory: 256M
+    restart: always
+
+  redis:
+    image: redis:7-alpine
+    container_name: ${PROJECT_NAME}_redis
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    networks:
+      - backend
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: always
