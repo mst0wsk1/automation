@@ -2,6 +2,7 @@ name: ${PROJECT_NAME}
 
 volumes:
   db_data:
+  redis_data:
 
 networks:
   frontend:
@@ -70,6 +71,8 @@ services:
         define('WP_MEMORY_LIMIT', '256M');
         define('DISALLOW_FILE_EDIT', true);
         define('FS_METHOD', 'direct');
+        define('XMLRPC_DISABLED', true);
+        define('WP_POST_REVISIONS', 5);
         define('WP_REDIS_HOST', getenv('WORDPRESS_REDIS_HOST') ?: 'redis');
         define('WP_REDIS_PORT', getenv('WORDPRESS_REDIS_PORT') ?: 6379);
     volumes:
@@ -104,7 +107,9 @@ services:
   redis:
     image: redis:7-alpine
     container_name: ${PROJECT_NAME}_redis
-    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --appendonly yes
+    volumes:
+      - redis_data:/data
     networks:
       - backend
     logging:
